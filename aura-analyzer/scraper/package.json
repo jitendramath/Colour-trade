@@ -1,0 +1,16 @@
+{
+  "name": "aura-scraper",
+  "version": "1.0.0",
+  "description": "24/7 Color Trading Data Collector",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.1",
+    "firebase-admin": "^12.0.0",
+    "puppeteer": "^22.0.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
+  }
+}
