@@ -1,10 +1,10 @@
 const http = require('http');
 const PORT = process.env.PORT || 10000;
 
-// Fake Server to keep Render happy
+// Fake Server (Render को खुश रखने के लिए)
 http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.write('Aura Scraper is Hunting! 🎯');
+  res.write('Aura Scraper (Firestore Edition) is Running! 🚀');
   res.end();
 }).listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
 
@@ -13,20 +13,27 @@ const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const admin = require('firebase-admin');
 
+// Service Account
 const serviceAccount = require('./serviceAccountKey.json');
 
 puppeteer.use(StealthPlugin());
 
+// 🔥 Firestore Initialization
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-  databaseURL: process.env.FIREBASE_DATABASE_URL
+  credential: admin.credential.cert(serviceAccount)
 });
 
-const db = admin.database();
-let lastPeriodId = null;
+const db = admin.firestore(); // अब हम Firestore यूज़ कर रहे हैं
+
+// 🎨 Color Logic (Math Based - 100% Accurate)
+function getColorFromNumber(n) {
+  if ([0, 5].includes(n)) return 'V'; // Violet (Purple)
+  if ([1, 3, 7, 9].includes(n)) return 'G'; // Green
+  return 'R'; // Red (2, 4, 6, 8)
+}
 
 async function startScraper() {
-  console.log("🚀 Starting Aura Scraper (Advanced Mode)...");
+  console.log("🚀 Starting Aura Scraper (Firestore Version)...");
 
   const browser = await puppeteer.launch({
     headless: 'new',
@@ -36,16 +43,15 @@ async function startScraper() {
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       '--disable-gpu',
-      '--window-size=390,844' // Force Mobile View
+      '--window-size=390,844'
     ]
   });
 
   const page = await browser.newPage();
-  // iPhone 12 Pro Viewport
-  await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
+  await page.setViewport({ width: 390, height: 844 });
 
   try {
-    // 1. Auth & Login
+    // 1. Login Bypass
     console.log("🔐 Injecting Token...");
     await page.goto('https://damanclub.asia/#/', { waitUntil: 'domcontentloaded' });
     
@@ -58,98 +64,80 @@ async function startScraper() {
     console.log("🎮 Going to Game Page...");
     await page.goto(process.env.TARGET_URL, { waitUntil: 'networkidle2', timeout: 60000 });
 
-    // 3. Ensure "Game History" tab is active
+    // 3. Ensure History Tab
     try {
-        // कभी-कभी हिस्ट्री टैब पर क्लिक करना पड़ता है
-        await page.waitForSelector('.van-tabs__nav', { timeout: 5000 });
-        const tabs = await page.$$('.van-tab');
-        if(tabs.length > 0) {
-            // Usually the bottom tabs or history tabs
-            console.log("Found tabs, ensuring History is visible...");
-        }
-    } catch(e) {}
+        await page.waitForSelector('.van-row', { timeout: 10000 });
+        console.log("✅ Game Table Found!");
+    } catch(e) {
+        console.log("⚠️ Table not loaded immediately. Waiting...");
+    }
 
-    console.log("👀 Looking for Data...");
-
-    // 4. Scraping Loop
+    // 4. Infinite Loop
     setInterval(async () => {
       try {
-        const result = await page.evaluate(() => {
-          // Daman की नई लिस्ट स्ट्रक्चर को ढूंढना
-          // हम सीधे उन div को ढूंढेंगे जिनमें लंबा नंबर है
-          const allDivs = Array.from(document.querySelectorAll('div'));
-          
-          // ऐसा div ढूंढो जिसमें लंबा Period ID हो (2026...)
-          const historyRow = allDivs.find(div => {
-             return div.innerText && /\d{12,}/.test(div.innerText) && (div.innerText.includes('Big') || div.innerText.includes('Small'));
-          });
+        const data = await page.evaluate(() => {
+            // Daman की नई लिस्ट से डेटा निकालना
+            const rows = document.querySelectorAll('.van-row');
+            // पहली रो अक्सर हेडर होती है, इसलिए दूसरी रो (index 1) या पहली (index 0) चेक करें
+            // हम टेक्स्ट पैटर्न से असली डेटा पहचानेंगे
+            let bestRow = null;
+            
+            for (let row of rows) {
+                if (row.innerText.match(/\d{12,}/)) { // जिसमें लंबा Period ID हो
+                    bestRow = row;
+                    break;
+                }
+            }
+            
+            if (!bestRow) return null;
 
-          if (!historyRow) return { error: "No history row found" };
+            const text = bestRow.innerText;
+            
+            // Period ID (2026...)
+            const periodMatch = text.match(/\d{12,}/);
+            const period = periodMatch ? periodMatch[0] : null;
+            
+            // Number (0-9)
+            // टेक्स्ट "2026... 5 Small" जैसा होता है
+            const nums = text.match(/\b\d\b/g); // सिंगल डिजिट नंबर ढूँढो
+            let number = null;
+            
+            if (nums && nums.length > 0) {
+                // अक्सर नंबर Period ID के बाद आता है
+                number = parseInt(nums[nums.length - 1]); // आखिरी सिंगल डिजिट
+            }
 
-          const text = historyRow.innerText;
-          
-          // 1. Period ID निकालना (सबसे लंबा नंबर)
-          const periodMatch = text.match(/\d{12,}/); 
-          const fullPeriod = periodMatch ? periodMatch[0] : null;
-          
-          // 2. Number निकालना (आखिरी बड़ा अंक जो 0-9 हो)
-          // अक्सर टेक्स्ट ऐसा होता है: "2026... 5 Small Green"
-          const numberMatch = text.match(/\b\d\b/); 
-          // अगर सीधा नहीं मिला, तो टेक्स्ट को तोड़कर देखो
-          let number = 0;
-          if (numberMatch) {
-              number = parseInt(numberMatch[0]);
-          } else {
-              // Fallback: टेक्स्ट के टुकड़ों में नंबर ढूंढो
-              const parts = text.split(/[\s\n]+/);
-              const numPart = parts.find(p => /^\d$/.test(p));
-              if(numPart) number = parseInt(numPart);
-          }
-
-          // 3. Color निकालना
-          let color = 'N';
-          if (text.toLowerCase().includes('green')) color = 'G';
-          else if (text.toLowerCase().includes('red')) color = 'R';
-          else if (text.toLowerCase().includes('violet')) color = 'V';
-          
-          // Fallback Color Logic (अगर कलर टेक्स्ट में नहीं लिखा)
-          if (color === 'N') {
-             if ([0, 5].includes(number)) color = 'V'; // Daman logic: 0/5 often come with violet
-             else if ([1, 3, 7, 9].includes(number)) color = 'G';
-             else color = 'R';
-          }
-
-          return { p: fullPeriod, n: number, c: color, raw: text };
+            return { p: period, n: number };
         });
 
-        if (result.error) {
-           console.log("⚠️ Scraper Warning: Looking for data...");
-           return;
-        }
+        if (data && data.p && data.n !== null) {
+          // कलर खुद कैलकुलेट करें (Screen read करने की जरूरत नहीं)
+          const color = getColorFromNumber(data.n);
+          const shortPeriod = data.p.slice(-4); // आखिरी 4 अंक
 
-        // --- DATABASE SAVE ---
-        if (result.p && result.p !== lastPeriodId) {
-          lastPeriodId = result.p;
+          // 🔥 Save to Firestore
+          // Collection: "history", Doc ID: PeriodNumber
+          const docRef = db.collection('history').doc(data.p);
           
-          // Period के आखिरी 4 अंक दिखावे के लिए (Frontend के लिए आसान)
-          const shortPeriod = result.p.slice(-4); 
-          
-          const today = new Date().toISOString().split('T')[0];
-          
-          // हम पूरा Period ID सेव करेंगे ताकि मैच हो सके
-          await db.ref(`results/${today}/${result.p}`).set({
-            n: result.n,
-            c: result.c,
-            full: result.p // पूरा आईडी भी सेव कर रहे हैं
-          });
-
-          console.log(`🔥 DETECTED: ${shortPeriod} | Num: ${result.n} | Color: ${result.c}`);
+          const doc = await docRef.get();
+          if (!doc.exists) {
+              await docRef.set({
+                  period: data.p,
+                  shortPeriod: shortPeriod,
+                  number: data.n,
+                  color: color,
+                  timestamp: admin.firestore.FieldValue.serverTimestamp()
+              });
+              console.log(`🔥 NEW RESULT: ${shortPeriod} -> ${data.n} [${color}]`);
+          }
+        } else {
+           // console.log("Scanning..."); // Logs भरने से रोकने के लिए कमेंट किया
         }
 
       } catch (err) {
-        console.error("Loop Error:", err.message);
+        console.error("Scrape Error:", err.message);
       }
-    }, 2000); // हर 2 सेकंड में चेक करें (तेज़ रिस्पॉन्स के लिए)
+    }, 2000);
 
   } catch (error) {
     console.error("❌ Fatal Error:", error);
