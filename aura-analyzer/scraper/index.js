@@ -1,10 +1,10 @@
 const http = require('http');
 const PORT = process.env.PORT || 10000;
 
+// Render Health Check
 http.createServer((req, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.write('Aura Scraper (X-Ray Mode) is Active! 🎯');
-  res.end();
+  res.writeHead(200);
+  res.end('Aura Scraper is Alive & Kicking!');
 }).listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
 
 require('dotenv').config();
@@ -15,118 +15,110 @@ const serviceAccount = require('./serviceAccountKey.json');
 
 puppeteer.use(StealthPlugin());
 
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
-});
+// Firestore Init
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount)
+  });
+}
 const db = admin.firestore();
 
-// 100% सटीक कलर लॉजिक
-function getColor(n) {
-  if ([0, 5].includes(n)) return 'V';
-  if ([1, 3, 7, 9].includes(n)) return 'G';
-  return 'R';
-}
-
 async function startScraper() {
-  console.log("🚀 Starting X-Ray Scraper...");
-
-  const browser = await puppeteer.launch({
-    headless: 'new',
-    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--window-size=390,844']
-  });
-
-  const page = await browser.newPage();
-  await page.setViewport({ width: 390, height: 844 });
+  console.log("🚀 Starting Scraper (Linux Chromium Mode)...");
 
   try {
-    // 1. लॉगिन बायपास
-    console.log("🔐 Injecting Login...");
+    const browser = await puppeteer.launch({
+      headless: 'new', // या true
+      // ✅ सबसे जरूरी लाइन: Dockerfile वाली लोकेशन
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage', // Memory Crash से बचाएगा
+        '--disable-gpu',
+        '--disable-software-rasterizer',
+        '--disable-features=IsolateOrigins,site-per-process',
+        '--no-zygote'
+      ],
+      ignoreDefaultArgs: ['--disable-extensions']
+    });
+
+    console.log("✅ Browser Launched Successfully (Render Proof)!");
+    
+    const page = await browser.newPage();
+    await page.setViewport({ width: 390, height: 844 });
+
+    // 1. Login
+    console.log("🔐 Logging in...");
     await page.goto('https://damanclub.asia/#/', { waitUntil: 'domcontentloaded' });
+    
     await page.evaluate((t) => {
       localStorage.setItem('token', t);
       localStorage.setItem('userToken', t);
     }, process.env.AUTH_TOKEN);
 
-    // 2. गेम पेज पर जाएं
-    console.log("🎮 Entering Game Arena...");
+    // 2. Go to Game
+    console.log("🎮 Entering Game...");
     await page.goto(process.env.TARGET_URL, { waitUntil: 'networkidle2', timeout: 60000 });
 
-    // 3. गेम हिस्ट्री टैब पर क्लिक करना (जरूरी है)
+    // 3. Tab Logic
     try {
-        await page.waitForSelector('.van-tab', { timeout: 5000 });
-        // 'Game history' टैब ढूंढकर क्लिक करें
-        await page.evaluate(() => {
-            const tabs = Array.from(document.querySelectorAll('.van-tab'));
-            const historyTab = tabs.find(t => t.innerText.includes('History') || t.innerText.includes('history'));
-            if (historyTab) historyTab.click();
-        });
-        console.log("✅ Clicked History Tab");
-    } catch(e) { console.log("⚠️ Could not click tab, checking directly..."); }
+      await page.waitForSelector('.van-tab', { timeout: 5000 });
+      await page.evaluate(() => {
+        const tabs = Array.from(document.querySelectorAll('.van-tab'));
+        const history = tabs.find(t => t.innerText.includes('History'));
+        if (history) history.click();
+      });
+      console.log("✅ Tab Clicked");
+    } catch (e) { console.log("⚠️ Tab skip"); }
 
-    // 4. स्कैनिंग लूप
+    console.log("👀 Scanning...");
+
+    // 4. Loop
     setInterval(async () => {
       try {
-        const result = await page.evaluate(() => {
-          // X-RAY LOGIC: क्लास नाम छोड़ो, सीधे टेक्स्ट ढूंढो!
-          // पेज के सारे div उठाओ
-          const allDivs = Array.from(document.querySelectorAll('div'));
+        const data = await page.evaluate(() => {
+          const divs = Array.from(document.querySelectorAll('div'));
+          // X-Ray finding
+          const target = divs.find(d => /\d{12,}/.test(d.innerText) && (d.innerText.includes('Big') || d.innerText.includes('Small')));
           
-          // ऐसा div ढूंढो जिसमें लंबा Period ID हो (जैसे 20260212...)
-          // और उसी लाइन में 'Big' या 'Small' भी लिखा हो (ताकि कंफर्म हो जाए कि ये रिजल्ट ही है)
-          const targetDiv = allDivs.find(div => 
-            /\d{12,}/.test(div.innerText) && 
-            (div.innerText.includes('Big') || div.innerText.includes('Small'))
-          );
+          if (!target) return null;
+          
+          const text = target.innerText;
+          const pMatch = text.match(/\d{12,}/);
+          const nMatch = text.match(/\b\d\b/g);
+          
+          if (!pMatch || !nMatch) return null;
 
-          if (!targetDiv) return null;
-
-          const text = targetDiv.innerText;
-          
-          // डेटा पार्सिंग
-          const periodMatch = text.match(/\d{12,}/);
-          if (!periodMatch) return null;
-          
-          const fullPeriod = periodMatch[0];
-          
-          // नंबर निकालना (आखिरी सिंगल डिजिट)
-          const numberMatch = text.match(/\b\d\b/g);
-          if (!numberMatch) return null;
-          const number = parseInt(numberMatch[numberMatch.length - 1]);
-
-          return { p: fullPeriod, n: number };
+          return {
+            period: pMatch[0],
+            number: parseInt(nMatch[nMatch.length - 1])
+          };
         });
 
-        if (result) {
-          const color = getColor(result.n);
-          const shortPeriod = result.p.slice(-4);
-
-          // Firestore में सेव करें
-          const docRef = db.collection('history').doc(result.p);
+        if (data) {
+          const color = ([0,5].includes(data.number)) ? 'V' : ([1,3,7,9].includes(data.number) ? 'G' : 'R');
+          const shortP = data.period.slice(-4);
+          
+          const docRef = db.collection('history').doc(data.period);
           const doc = await docRef.get();
           
           if (!doc.exists) {
-              await docRef.set({
-                  period: result.p,
-                  shortPeriod: shortPeriod,
-                  number: result.n,
-                  color: color,
-                  timestamp: admin.firestore.FieldValue.serverTimestamp()
-              });
-              console.log(`🔥 SAVE: ${shortPeriod} -> ${result.n} [${color}]`);
-          } else {
-              console.log(`zzz Scanning... (Last: ${shortPeriod})`);
+            await docRef.set({
+              period: data.period,
+              shortPeriod: shortP,
+              number: data.number,
+              color: color,
+              timestamp: admin.firestore.FieldValue.serverTimestamp()
+            });
+            console.log(`🔥 NEW: ${shortP} -> ${data.number} [${color}]`);
           }
-        } else {
-          console.log("⚠️ No Data Found on Screen (Retrying...)");
         }
-      } catch (e) {
-        console.error("Loop Error:", e.message);
-      }
-    }, 3000);
+      } catch (err) {}
+    }, 2000);
 
   } catch (error) {
-    console.error("❌ Fatal Error:", error);
+    console.error("❌ ERROR:", error);
     process.exit(1);
   }
 }
