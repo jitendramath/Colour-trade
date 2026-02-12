@@ -3,7 +3,7 @@ const PORT = process.env.PORT || 10000;
 
 http.createServer((req, res) => {
   res.writeHead(200);
-  res.end('Aura Scraper is Alive!');
+  res.end('Aura Scraper is Hunting! 🕵️‍♂️');
 }).listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
 
 require('dotenv').config();
@@ -22,7 +22,7 @@ if (!admin.apps.length) {
 const db = admin.firestore();
 
 async function startScraper() {
-  console.log("🚀 Starting Scraper (Super-Aggressive Login Mode)...");
+  console.log("🚀 Starting Super-Debug Scraper...");
 
   try {
     const browser = await puppeteer.launch({
@@ -34,80 +34,84 @@ async function startScraper() {
     const page = await browser.newPage();
     await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
 
-    // 1. Home Page पर जाकर टोकन इंजेक्ट करना
-    console.log("🔐 Step 1: Injecting Auth Keys...");
+    console.log("🔐 Step 1: Injecting Session...");
     await page.goto('https://damanclub.asia/#/', { waitUntil: 'networkidle2' });
     
     const token = process.env.AUTH_TOKEN;
     await page.evaluate((t) => {
-      // आपकी फोटो (5a96... और 4234...) के हिसाब से टोकन डालना
       localStorage.setItem('token', t);
-      localStorage.setItem('refreshToken', t);
       localStorage.setItem('userToken', t);
-      localStorage.setItem('Authorization', t);
-      
-      // Cookie में भी डाल देते हैं, कभी-कभी साइट यहाँ से पढ़ती है
-      document.cookie = `token=${t}; path=/; domain=.damanclub.asia`;
     }, token);
 
-    // 2. पेज रिफ्रेश करना (ताकि लॉगिन लागू हो जाए)
-    console.log("🔄 Step 2: Refreshing to apply session...");
-    await page.reload({ waitUntil: 'networkidle2' });
-
-    // 3. गेम पेज पर जाना
-    console.log("🎮 Step 3: Entering Game Area...");
+    console.log("🎮 Step 2: Navigating to Game...");
     await page.goto(process.env.TARGET_URL, { waitUntil: 'networkidle2', timeout: 60000 });
 
-    // 4. किसी भी पॉप-अप (Attention/Upgrade) को हटाना
-    try {
-        await page.evaluate(() => {
-            const closeBtn = document.querySelector('.van-dialog__confirm') || document.querySelector('.close-btn');
-            if (closeBtn) closeBtn.click();
-        });
-    } catch (e) {}
+    // पॉप-अप हटाना (अगर कोई हो)
+    await new Promise(r => setTimeout(r, 5000));
+    await page.evaluate(() => {
+      const btns = Array.from(document.querySelectorAll('button, .van-button'));
+      const close = btns.find(b => b.innerText.includes('Confirm') || b.innerText.includes('Close') || b.innerText.includes('X'));
+      if (close) close.click();
+    });
 
-    console.log("👀 Scanning for Results...");
+    console.log("📡 LOOP STARTED: Watching screen every 5s...");
 
     setInterval(async () => {
       try {
-        const result = await page.evaluate(() => {
-          const bodyText = document.body.innerText;
-          // Period ID और नंबर का पैटर्न ढूँढना (जैसे 2026... 5 Big)
-          const match = bodyText.match(/(202\d{10,})[\s\n]+(\d)[\s\n]+(Big|Small)/);
+        const pageData = await page.evaluate(() => {
+          const text = document.body.innerText;
+          // थोड़े से ढीले (Loose) Regex का इस्तेमाल ताकि डेटा मिस न हो
+          const pMatch = text.match(/202\d{10,}/); // 12+ अंकों वाला पीरियड ढूँढो
           
-          if (match) {
-            return { period: match[1], number: parseInt(match[2]) };
-          }
-          return null;
+          return {
+            raw: text.substring(0, 150).replace(/\n/g, ' '), // स्क्रीन का शुरुआती हिस्सा
+            foundPeriod: pMatch ? pMatch[0] : null
+          };
         });
 
-        if (result) {
-          const color = ([0,5].includes(result.number)) ? 'V' : ([1,3,7,9].includes(result.number) ? 'G' : 'R');
-          const shortP = result.period.slice(-4);
+        if (pageData.foundPeriod) {
+          // अगर पीरियड मिल गया, तो उसी के आसपास नंबर ढूँढने की कोशिश करें
+          const fullText = await page.evaluate(() => document.body.innerText);
+          const lines = fullText.split('\n');
           
-          const docRef = db.collection('history').doc(result.period);
-          const doc = await docRef.get();
-          
-          if (!doc.exists) {
-            await docRef.set({
-              period: result.period,
-              shortPeriod: shortP,
-              number: result.number,
-              color: color,
-              timestamp: admin.firestore.FieldValue.serverTimestamp()
-            });
-            console.log(`🔥 SUCCESS: ${shortP} -> ${result.number} [${color}]`);
+          // पीरियड वाली लाइन के बाद की 5 लाइनें चेक करें
+          const periodIndex = lines.findIndex(l => l.includes(pageData.foundPeriod));
+          let number = null;
+
+          if (periodIndex !== -1) {
+             const lookArea = lines.slice(periodIndex, periodIndex + 4).join(' ');
+             const numMatch = lookArea.match(/\b\d\b/); // सिंगल डिजिट नंबर
+             if (numMatch) number = parseInt(numMatch[0]);
+          }
+
+          if (number !== null) {
+            const color = ([0,5].includes(number)) ? 'V' : ([1,3,7,9].includes(number) ? 'G' : 'R');
+            const docRef = db.collection('history').doc(pageData.foundPeriod);
+            const doc = await docRef.get();
+            
+            if (!doc.exists) {
+              await docRef.set({
+                period: pageData.foundPeriod,
+                shortPeriod: pageData.foundPeriod.slice(-4),
+                number: number,
+                color: color,
+                timestamp: admin.firestore.FieldValue.serverTimestamp()
+              });
+              console.log(`🔥 [FOUND]: ${pageData.foundPeriod.slice(-4)} -> ${number}`);
+            }
+          } else {
+             console.log(`⚠️ Period ${pageData.foundPeriod} found, but Number is hiding. Raw: ${pageData.raw}`);
           }
         } else {
-           // अगर अभी भी लॉगिन नहीं हुआ, तो प्रिव्यू दिखाओ
-           const preview = document.body.innerText.substring(0, 100).replace(/\n/g, ' ');
-           console.log(`📡 Scanning... Status: ${preview.includes("Log in") ? "LOGIN REQUIRED" : "ON GAME PAGE"}`);
+           console.log(`📡 Scanning... Status: ${pageData.raw.includes("Log in") ? "LOGIN FAILED (Token Expired?)" : "ON PAGE: " + pageData.raw}`);
         }
-      } catch (err) {}
-    }, 3000);
+      } catch (err) {
+        console.log("Loop Error:", err.message);
+      }
+    }, 5000);
 
   } catch (error) {
-    console.error("❌ FATAL ERROR:", error);
+    console.error("❌ FATAL:", error);
     process.exit(1);
   }
 }
