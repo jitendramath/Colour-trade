@@ -1,10 +1,9 @@
 const http = require('http');
 const PORT = process.env.PORT || 10000;
 
-// Fake Server (Render को खुश रखने के लिए)
 http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.write('Aura Scraper (Firestore Edition) is Running! 🚀');
+  res.write('Aura Scraper (X-Ray Mode) is Active! 🎯');
   res.end();
 }).listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
 
@@ -12,132 +11,119 @@ require('dotenv').config();
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const admin = require('firebase-admin');
-
-// Service Account
 const serviceAccount = require('./serviceAccountKey.json');
 
 puppeteer.use(StealthPlugin());
 
-// 🔥 Firestore Initialization
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
 });
+const db = admin.firestore();
 
-const db = admin.firestore(); // अब हम Firestore यूज़ कर रहे हैं
-
-// 🎨 Color Logic (Math Based - 100% Accurate)
-function getColorFromNumber(n) {
-  if ([0, 5].includes(n)) return 'V'; // Violet (Purple)
-  if ([1, 3, 7, 9].includes(n)) return 'G'; // Green
-  return 'R'; // Red (2, 4, 6, 8)
+// 100% सटीक कलर लॉजिक
+function getColor(n) {
+  if ([0, 5].includes(n)) return 'V';
+  if ([1, 3, 7, 9].includes(n)) return 'G';
+  return 'R';
 }
 
 async function startScraper() {
-  console.log("🚀 Starting Aura Scraper (Firestore Version)...");
+  console.log("🚀 Starting X-Ray Scraper...");
 
   const browser = await puppeteer.launch({
     headless: 'new',
     executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-      '--window-size=390,844'
-    ]
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--window-size=390,844']
   });
 
   const page = await browser.newPage();
   await page.setViewport({ width: 390, height: 844 });
 
   try {
-    // 1. Login Bypass
-    console.log("🔐 Injecting Token...");
+    // 1. लॉगिन बायपास
+    console.log("🔐 Injecting Login...");
     await page.goto('https://damanclub.asia/#/', { waitUntil: 'domcontentloaded' });
-    
-    await page.evaluate((token) => {
-      localStorage.setItem('token', token);
-      localStorage.setItem('userToken', token);
+    await page.evaluate((t) => {
+      localStorage.setItem('token', t);
+      localStorage.setItem('userToken', t);
     }, process.env.AUTH_TOKEN);
 
-    // 2. Go to Game
-    console.log("🎮 Going to Game Page...");
+    // 2. गेम पेज पर जाएं
+    console.log("🎮 Entering Game Arena...");
     await page.goto(process.env.TARGET_URL, { waitUntil: 'networkidle2', timeout: 60000 });
 
-    // 3. Ensure History Tab
+    // 3. गेम हिस्ट्री टैब पर क्लिक करना (जरूरी है)
     try {
-        await page.waitForSelector('.van-row', { timeout: 10000 });
-        console.log("✅ Game Table Found!");
-    } catch(e) {
-        console.log("⚠️ Table not loaded immediately. Waiting...");
-    }
+        await page.waitForSelector('.van-tab', { timeout: 5000 });
+        // 'Game history' टैब ढूंढकर क्लिक करें
+        await page.evaluate(() => {
+            const tabs = Array.from(document.querySelectorAll('.van-tab'));
+            const historyTab = tabs.find(t => t.innerText.includes('History') || t.innerText.includes('history'));
+            if (historyTab) historyTab.click();
+        });
+        console.log("✅ Clicked History Tab");
+    } catch(e) { console.log("⚠️ Could not click tab, checking directly..."); }
 
-    // 4. Infinite Loop
+    // 4. स्कैनिंग लूप
     setInterval(async () => {
       try {
-        const data = await page.evaluate(() => {
-            // Daman की नई लिस्ट से डेटा निकालना
-            const rows = document.querySelectorAll('.van-row');
-            // पहली रो अक्सर हेडर होती है, इसलिए दूसरी रो (index 1) या पहली (index 0) चेक करें
-            // हम टेक्स्ट पैटर्न से असली डेटा पहचानेंगे
-            let bestRow = null;
-            
-            for (let row of rows) {
-                if (row.innerText.match(/\d{12,}/)) { // जिसमें लंबा Period ID हो
-                    bestRow = row;
-                    break;
-                }
-            }
-            
-            if (!bestRow) return null;
+        const result = await page.evaluate(() => {
+          // X-RAY LOGIC: क्लास नाम छोड़ो, सीधे टेक्स्ट ढूंढो!
+          // पेज के सारे div उठाओ
+          const allDivs = Array.from(document.querySelectorAll('div'));
+          
+          // ऐसा div ढूंढो जिसमें लंबा Period ID हो (जैसे 20260212...)
+          // और उसी लाइन में 'Big' या 'Small' भी लिखा हो (ताकि कंफर्म हो जाए कि ये रिजल्ट ही है)
+          const targetDiv = allDivs.find(div => 
+            /\d{12,}/.test(div.innerText) && 
+            (div.innerText.includes('Big') || div.innerText.includes('Small'))
+          );
 
-            const text = bestRow.innerText;
-            
-            // Period ID (2026...)
-            const periodMatch = text.match(/\d{12,}/);
-            const period = periodMatch ? periodMatch[0] : null;
-            
-            // Number (0-9)
-            // टेक्स्ट "2026... 5 Small" जैसा होता है
-            const nums = text.match(/\b\d\b/g); // सिंगल डिजिट नंबर ढूँढो
-            let number = null;
-            
-            if (nums && nums.length > 0) {
-                // अक्सर नंबर Period ID के बाद आता है
-                number = parseInt(nums[nums.length - 1]); // आखिरी सिंगल डिजिट
-            }
+          if (!targetDiv) return null;
 
-            return { p: period, n: number };
+          const text = targetDiv.innerText;
+          
+          // डेटा पार्सिंग
+          const periodMatch = text.match(/\d{12,}/);
+          if (!periodMatch) return null;
+          
+          const fullPeriod = periodMatch[0];
+          
+          // नंबर निकालना (आखिरी सिंगल डिजिट)
+          const numberMatch = text.match(/\b\d\b/g);
+          if (!numberMatch) return null;
+          const number = parseInt(numberMatch[numberMatch.length - 1]);
+
+          return { p: fullPeriod, n: number };
         });
 
-        if (data && data.p && data.n !== null) {
-          // कलर खुद कैलकुलेट करें (Screen read करने की जरूरत नहीं)
-          const color = getColorFromNumber(data.n);
-          const shortPeriod = data.p.slice(-4); // आखिरी 4 अंक
+        if (result) {
+          const color = getColor(result.n);
+          const shortPeriod = result.p.slice(-4);
 
-          // 🔥 Save to Firestore
-          // Collection: "history", Doc ID: PeriodNumber
-          const docRef = db.collection('history').doc(data.p);
-          
+          // Firestore में सेव करें
+          const docRef = db.collection('history').doc(result.p);
           const doc = await docRef.get();
+          
           if (!doc.exists) {
               await docRef.set({
-                  period: data.p,
+                  period: result.p,
                   shortPeriod: shortPeriod,
-                  number: data.n,
+                  number: result.n,
                   color: color,
                   timestamp: admin.firestore.FieldValue.serverTimestamp()
               });
-              console.log(`🔥 NEW RESULT: ${shortPeriod} -> ${data.n} [${color}]`);
+              console.log(`🔥 SAVE: ${shortPeriod} -> ${result.n} [${color}]`);
+          } else {
+              console.log(`zzz Scanning... (Last: ${shortPeriod})`);
           }
         } else {
-           // console.log("Scanning..."); // Logs भरने से रोकने के लिए कमेंट किया
+          console.log("⚠️ No Data Found on Screen (Retrying...)");
         }
-
-      } catch (err) {
-        console.error("Scrape Error:", err.message);
+      } catch (e) {
+        console.error("Loop Error:", e.message);
       }
-    }, 2000);
+    }, 3000);
 
   } catch (error) {
     console.error("❌ Fatal Error:", error);
