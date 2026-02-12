@@ -9,7 +9,7 @@ WORKDIR /usr/src/app
 
 # फाइलों को कॉपी करना
 COPY package*.json ./
-RUN npm ci
+RUN npm install
 
 COPY . .
 
